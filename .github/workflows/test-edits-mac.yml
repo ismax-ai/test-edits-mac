@@ -1,0 +1,49 @@
+name: test-edits-mac
+on:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - name: 1. Machine
+        run: |
+          uname -m; sw_vers; sysctl -n machdep.cpu.brand_string
+      - name: 2. Ou trouver Edits
+        run: |
+          mkdir -p out
+          for u in https://edits.instagram.com/mac https://edits.instagram.com/download https://edits.instagram.com/; do
+            echo "== $u"
+            curl -sL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15" -o page.html -w "%{http_code} %{url_effective}\n" "$u" || true
+            grep -o -E 'https?:[^"'"'"' <>]*(\.dmg|\.zip|\.pkg|apps\.apple\.com[^"'"'"' <>]*)' page.html | sed 's/\\\//\//g' | sort -u | tee -a out/liens.txt || true
+          done
+          brew search --cask edits 2>&1 | tee out/brew.txt || true
+          brew install mas >/dev/null 2>&1 && mas search "Edits" 2>&1 | head -20 | tee out/mas.txt || true
+      - name: 3. Installer Edits si un fichier direct existe
+        run: |
+          URL=$(grep -E '\.(dmg|zip|pkg)' out/liens.txt | head -1 || true)
+          echo "fichier direct: ${URL:-aucun}"
+          [ -z "$URL" ] && exit 0
+          curl -sL -o edits.bin "$URL"; file edits.bin
+          case "$URL" in
+            *.dmg) hdiutil attach edits.bin -nobrowse -mountpoint /Volumes/edits && cp -R /Volumes/edits/*.app /Applications/ ;;
+            *.zip) ditto -x -k edits.bin /Applications/ ;;
+            *.pkg) sudo installer -pkg edits.bin -target / ;;
+          esac
+          ls /Applications | tee out/apps.txt
+      - name: 4. Ouvrir Edits sans se connecter
+        run: |
+          APP=$(ls -d /Applications/*dits*.app 2>/dev/null | head -1 || true)
+          echo "app: ${APP:-absente}"
+          [ -z "$APP" ] && exit 0
+          open "$APP"; sleep 60
+          screencapture -x out/ecran.png || true
+          lsof -nP -iTCP -sTCP:LISTEN | tee out/ports.txt || true
+          curl -s -m 5 http://127.0.0.1:19501/mcp -o out/mcp.txt -w "%{http_code}\n" || true
+          ls ~/Library/Application\ Support | tee out/support.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultat-test-edits
+          path: out/
